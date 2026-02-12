@@ -20,14 +20,8 @@ jobs:
         run: npm install --legacy-peer-deps
         working-directory: ./VeneredNativeApp
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./VeneredNativeApp/android/gradlew
@@ -35,11 +29,8 @@ jobs:
       - name: Build with Gradle
         run: ./VeneredNativeApp/android/gradlew -p ./VeneredNativeApp/android assembleDebug
 
-      - name: List build outputs for debugging
-        run: ls -R VeneredNativeApp/android/app/build/outputs
-
-      - name: Upload APK as artifact
+      - name: Upload APKs as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug.apk
-          path: VeneredNativeApp/android/app/build/outputs/apk/debug/app-debug.apk
+          name: android-apks
+          path: VeneredNativeApp/android/app/build/outputs/apk/debug/
