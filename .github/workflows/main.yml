@@ -24,7 +24,7 @@ jobs:
         run: chmod +x ./VeneredNativeApp/android/gradlew
 
       - name: Build with Gradle
-        run: ./VeneredNativeApp/android/gradlew -p ./VeneredNativeApp/android assembleDebug
+        run: ./VeneredNativeApp/android/gradlew -p ./VeneredNativeApp/android assembleDebug -x :VeneredNativeApp:ios:podInstall
 
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
