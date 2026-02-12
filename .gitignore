@@ -1,0 +1,28 @@
+# Node
+node_modules/
+npm-debug.log
+.pnp.cjs
+.pnp.loader.mjs
+
+# React Native
+*.js.map
+
+# Metro Bundler
+.metro-cache/
+
+# Android
+android/build/
+android/app/build/
+android/app/src/main/assets/index.android.bundle
+android/.gradle/
+
+# iOS
+ios/build/
+
+# Buck
+.buckd/
+buck-out/
+
+# General temp files
+*.log
+*.lock
