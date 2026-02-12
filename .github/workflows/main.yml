@@ -35,6 +35,9 @@ jobs:
       - name: Build with Gradle
         run: ./VeneredNativeApp/android/gradlew -p ./VeneredNativeApp/android assembleDebug
 
+      - name: List build outputs for debugging
+        run: ls -R VeneredNativeApp/android/app/build/outputs
+
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
