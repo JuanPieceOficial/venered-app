@@ -8,10 +8,6 @@ apply plugin: "com.facebook.react"
  */
 react {
     autolinkLibrariesWithApp()
-    // --- INICIO DE LA MODIFICACIÓN ---
-    // Desactivamos la ofuscación de JS en el APK de release para obtener errores claros.
-    hermesFlagsRelease = [ "-O0", "-output-source-map" ]
-    // --- FIN DE LA MODIFICACIÓN ---
 }
 
 /**
