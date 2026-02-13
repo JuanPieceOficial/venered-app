@@ -18,4 +18,20 @@ buildscript {
     }
 }
 
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// This block ensures the build process can find the Android SDK in CI/CD environments
+try {
+    if (System.getenv("ANDROID_HOME") != null) {
+        android.sdkDirectory = new File(System.getenv("ANDROID_HOME"))
+    }
+} catch (all) {
+    // Ignore any errors, let the React Native plugin handle it
+}
+
 apply plugin: "com.facebook.react.rootproject"
