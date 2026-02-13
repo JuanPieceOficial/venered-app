@@ -1,9 +1,9 @@
 buildscript {
     ext {
-        buildToolsVersion = "36.0.0"
+        buildToolsVersion = "34.0.0"
         minSdkVersion = 24
-        compileSdkVersion = 36
-        targetSdkVersion = 36
+        compileSdkVersion = 34
+        targetSdkVersion = 34
         ndkVersion = "27.1.12297006"
         kotlinVersion = "2.1.20"
     }
@@ -16,22 +16,6 @@ buildscript {
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
     }
-}
-
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
-
-// This block ensures the build process can find the Android SDK in CI/CD environments
-try {
-    if (System.getenv("ANDROID_HOME") != null) {
-        android.sdkDirectory = new File(System.getenv("ANDROID_HOME"))
-    }
-} catch (all) {
-    // Ignore any errors, let the React Native plugin handle it
 }
 
 apply plugin: "com.facebook.react.rootproject"
