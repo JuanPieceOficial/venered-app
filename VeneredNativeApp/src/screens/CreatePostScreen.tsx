@@ -33,12 +33,20 @@ function CreatePostScreen(): React.JSX.Element {
 
     setIsPosting(true);
 
-    // ID de usuario temporal (reemplazar con autenticación real más adelante)
-    const tempUserId = 'a48c5e62-fe73-451e-874a-2e3d3b764b38'; 
+    // Obtenemos el usuario actual de la sesión de Supabase
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      setIsPosting(false);
+      Alert.alert('Error', 'No se pudo identificar al usuario. Por favor, inicia sesión de nuevo.');
+      // Opcional: forzar cierre de sesión
+      supabase.auth.signOut();
+      return;
+    }
 
     const { error } = await supabase
       .from('posts')
-      .insert([{ content: content.trim(), user_id: tempUserId }]);
+      .insert([{ content: content.trim(), user_id: user.id }]);
 
     setIsPosting(false);
 
@@ -108,7 +116,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   disabledButton: {
-    backgroundColor: '#5b21b6', // Un tono más oscuro/apagado de la primary
+    backgroundColor: '#5b21b6', 
     opacity: 0.7,
   },
   publishButtonText: {

@@ -9,18 +9,19 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
 // Definición de colores del tema Venered
 const THEME = {
-  background: '#0f172a', // Slate 900
-  card: '#1e293b',       // Slate 800
-  primary: '#7e22ce',    // Purple 700
-  secondary: '#a855f7',  // Purple 500
-  textPrimary: '#f8fafc',// Slate 50
-  textSecondary: '#94a3b8', // Slate 400
+  background: '#0f172a', 
+  card: '#1e293b',       
+  primary: '#7e22ce',    
+  secondary: '#a855f7',  
+  textPrimary: '#f8fafc',
+  textSecondary: '#94a3b8', 
   border: 'rgba(255, 255, 255, 0.1)',
 };
 
@@ -83,14 +84,25 @@ function HomeScreen(): React.JSX.Element {
     setRefreshing(false);
   };
 
-  useEffect(() => {
-    fetchPosts();
-  }, []);
+  // Usamos useFocusEffect para recargar los posts cada vez que la pantalla obtiene el foco
+  useFocusEffect(
+    useCallback(() => {
+      fetchPosts();
+    }, [])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchPosts();
   }, []);
+
+  const handleSignOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      Alert.alert('Error', 'No se pudo cerrar la sesión.');
+    }
+    // El listener en App.tsx se encargará de redirigir
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -103,9 +115,14 @@ function HomeScreen(): React.JSX.Element {
           </View>
           <Text style={styles.brandName}>Venered</Text>
         </View>
-        <TouchableOpacity style={styles.newPostBtn} onPress={() => navigation.navigate('CreatePost')}>
-          <Text style={styles.newPostBtnText}>+</Text>
-        </TouchableOpacity>
+        <View style={styles.navActions}>
+            <TouchableOpacity style={styles.newPostBtn} onPress={() => navigation.navigate('CreatePost')}>
+              <Text style={styles.newPostBtnText}>+</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
+              <Text style={styles.signOutBtnText}>Salir</Text>
+            </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.content}>
@@ -158,6 +175,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+    navActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   logoCircle: {
     width: 32,
     height: 32,
@@ -184,11 +205,23 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.primary,
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 16,
   },
   newPostBtnText: {
     color: '#fff',
     fontSize: 24,
     fontWeight: '300',
+  },
+    signOutBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: THEME.card,
+    marginLeft: 16,
+  },
+  signOutBtnText: {
+    color: THEME.textSecondary,
+    fontWeight: '600',
   },
   content: {
     flex: 1,
