@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -6,52 +7,39 @@ export const useUnreadNotifications = () => {
   const { user } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
 
-  useEffect(() => {
+  const loadUnreadCount = useCallback(async () => {
     if (!user) return;
+    try {
+      const { count, error } = await supabase
+        .from("notifications")
+        .select("", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("read", false)
+        .not("type", "eq", "message");
 
-    const loadUnreadCount = async () => {
-      try {
-        const { count, error } = await supabase
-          .from("notifications")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .eq("read", false);
+      if (error) throw error;
+      setUnreadCount(count || 0);
+    } catch (error) {
+      console.error("Error loading unread notifications count:", error);
+    }
+  }, [user]);
 
-        if (error) throw error;
-        setUnreadCount(count || 0);
-      } catch (error) {
-        console.error("Error loading unread notifications:", error);
-      }
-    };
-
+  useEffect(() => {
     loadUnreadCount();
 
     const channel = supabase
-      .channel("unread-notifications")
+      .channel("unread-notifications-count")
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
+          event: "*",
           schema: "public",
           table: "notifications",
-          filter: `user_id=eq.${user.id}`
+          filter: `user_id=eq.${user.id}`,
         },
         () => {
-          setUnreadCount((prev) => prev + 1);
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${user.id}`
-        },
-        (payload) => {
-          if (payload.new.read && !payload.old.read) {
-            setUnreadCount((prev) => Math.max(0, prev - 1));
-          }
+            // Recalculate everything when a change occurs
+            loadUnreadCount();
         }
       )
       .subscribe();
@@ -59,23 +47,26 @@ export const useUnreadNotifications = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [user, loadUnreadCount]);
 
   const markAllAsRead = async () => {
-    if (!user) return;
+    if (!user || unreadCount === 0) return;
 
     try {
-      await supabase
+      const { error } = await supabase
         .from("notifications")
         .update({ read: true })
         .eq("user_id", user.id)
-        .eq("read", false);
+        .eq("read", false)
+        .not("type", "eq", "message");
 
+      if (error) throw error;
+      // Manually set count to 0 for immediate feedback
       setUnreadCount(0);
     } catch (error) {
       console.error("Error marking notifications as read:", error);
     }
   };
 
-  return { unreadCount, markAllAsRead };
+  return { unreadCount, markAllAsRead, refresh: loadUnreadCount };
 };
