@@ -17,8 +17,6 @@ create table if not exists profiles (
   is_private boolean not null default false
 );
 
-alter table profiles drop column if exists email;
-
 -- Banned users
 create table if not exists banned_users (
   id uuid primary key default gen_random_uuid(),
@@ -32,14 +30,16 @@ create table if not exists banned_users (
 
 alter table banned_users enable row level security;
 
-create or replace function is_banned(user_id uuid)
+DROP FUNCTION IF EXISTS is_banned(uuid) CASCADE;
+create or replace function is_banned(p_user_id uuid)
 returns boolean
 language sql
 stable
+security definer
 as $$
   select exists(
     select 1 from banned_users
-    where banned_users.user_id = is_banned.user_id
+    where banned_users.user_id = p_user_id
       and banned_users.is_active = true
       and (banned_users.expires_at is null or banned_users.expires_at > now())
   );
@@ -104,25 +104,70 @@ create table if not exists posts (
   comments_count integer not null default 0
 );
 
-alter table posts add column if not exists is_private boolean not null default false;
-
 alter table posts enable row level security;
+
+-- Follows
+create table if not exists follows (
+  id uuid primary key default gen_random_uuid(),
+  follower_id uuid not null references profiles(id) on delete cascade,
+  following_id uuid not null references profiles(id) on delete cascade,
+  status text not null default 'accepted',
+  created_at timestamptz not null default now(),
+  unique (follower_id, following_id)
+);
+
+alter table follows enable row level security;
+
+drop policy if exists "Follows are viewable by authenticated users" on follows;
+create policy "Follows are viewable by authenticated users" on follows
+  for select using (auth.role() = 'authenticated' and not is_banned(auth.uid()));
+
+drop policy if exists "Users can follow" on follows;
+create policy "Users can follow" on follows
+  for insert with check (auth.uid() = follower_id and not is_banned(auth.uid()));
+
+drop policy if exists "Users can unfollow" on follows;
+create policy "Users can unfollow" on follows
+  for delete using (auth.uid() = follower_id and not is_banned(auth.uid()));
+
+create index if not exists idx_follows_follower on follows(follower_id);
+create index if not exists idx_follows_following on follows(following_id);
+
+-- Helper functions
+DROP FUNCTION IF EXISTS can_view_post(uuid, uuid, boolean) CASCADE;
+create or replace function can_view_post(viewer_id uuid, owner_id uuid, post_is_private boolean)
+returns boolean
+language sql
+stable
+security definer
+as $$
+  select
+    case
+      when viewer_id = owner_id then true
+      when exists (
+        select 1
+        from follows f
+        where f.follower_id = viewer_id
+          and f.following_id = owner_id
+          and f.status = 'accepted'
+      ) then true
+      when post_is_private = true then false
+      else not exists (
+        select 1
+        from profiles p
+        left join privacy_settings ps on ps.user_id = p.id
+        where p.id = owner_id
+          and (p.is_private = true or coalesce(ps.private_posts, false) = true)
+      )
+    end;
+$$;
 
 drop policy if exists "Posts are viewable by authenticated users" on posts;
 create policy "Posts are viewable by authenticated users" on posts
   for select using (
     auth.role() = 'authenticated'
     and not is_banned(auth.uid())
-    and (
-      auth.uid() = user_id
-      or not exists (
-        select 1
-        from profiles p
-        left join privacy_settings ps on ps.user_id = p.id
-        where p.id = posts.user_id
-          and (p.is_private = true or coalesce(ps.private_posts, false) = true)
-      )
-    )
+    and can_view_post(auth.uid(), posts.user_id, posts.is_private)
   );
 
 drop policy if exists "Users can insert posts" on posts;
@@ -160,16 +205,7 @@ create policy "Comments are viewable by authenticated users" on comments
       select 1
       from posts p
       where p.id = comments.post_id
-        and (
-          auth.uid() = p.user_id
-          or not exists (
-            select 1
-            from profiles pr
-            left join privacy_settings ps on ps.user_id = pr.id
-            where pr.id = p.user_id
-              and (pr.is_private = true or coalesce(ps.private_posts, false) = true)
-          )
-        )
+        and can_view_post(auth.uid(), p.user_id, p.is_private)
     )
   );
 
@@ -211,80 +247,6 @@ create policy "Users can remove their likes" on likes
   for delete using (auth.uid() = user_id and not is_banned(auth.uid()));
 
 create index if not exists idx_likes_post_id on likes(post_id);
-
--- Follows
-create table if not exists follows (
-  id uuid primary key default gen_random_uuid(),
-  follower_id uuid not null references profiles(id) on delete cascade,
-  following_id uuid not null references profiles(id) on delete cascade,
-  status text not null default 'accepted',
-  created_at timestamptz not null default now(),
-  unique (follower_id, following_id)
-);
-
-alter table follows enable row level security;
-
-drop policy if exists "Follows are viewable by authenticated users" on follows;
-create policy "Follows are viewable by authenticated users" on follows
-  for select using (auth.role() = 'authenticated' and not is_banned(auth.uid()));
-
-drop policy if exists "Users can follow" on follows;
-create policy "Users can follow" on follows
-  for insert with check (auth.uid() = follower_id and not is_banned(auth.uid()));
-
-drop policy if exists "Users can unfollow" on follows;
-create policy "Users can unfollow" on follows
-  for delete using (auth.uid() = follower_id and not is_banned(auth.uid()));
-
-create index if not exists idx_follows_follower on follows(follower_id);
-create index if not exists idx_follows_following on follows(following_id);
-
-create or replace function can_view_post(viewer_id uuid, owner_id uuid, post_is_private boolean)
-returns boolean
-language sql
-stable
-as $$
-  select
-    case
-      when viewer_id = owner_id then true
-      when exists (
-        select 1
-        from follows f
-        where f.follower_id = viewer_id
-          and f.following_id = owner_id
-          and f.status = 'accepted'
-      ) then true
-      when post_is_private = true then false
-      else not exists (
-        select 1
-        from profiles p
-        left join privacy_settings ps on ps.user_id = p.id
-        where p.id = owner_id
-          and (p.is_private = true or coalesce(ps.private_posts, false) = true)
-      )
-    end;
-$$;
-
-drop policy if exists "Posts are viewable by authenticated users" on posts;
-create policy "Posts are viewable by authenticated users" on posts
-  for select using (
-    auth.role() = 'authenticated'
-    and not is_banned(auth.uid())
-    and can_view_post(auth.uid(), posts.user_id, posts.is_private)
-  );
-
-drop policy if exists "Comments are viewable by authenticated users" on comments;
-create policy "Comments are viewable by authenticated users" on comments
-  for select using (
-    auth.role() = 'authenticated'
-    and not is_banned(auth.uid())
-    and exists (
-      select 1
-      from posts p
-      where p.id = comments.post_id
-        and can_view_post(auth.uid(), p.user_id, p.is_private)
-    )
-  );
 
 -- Messages
 create table if not exists messages (
@@ -405,9 +367,11 @@ create policy "Users can update typing status" on message_typing
 
 create index if not exists idx_message_typing_receiver on message_typing(receiver_id);
 
+DROP FUNCTION IF EXISTS set_message_typing_updated_at() CASCADE;
 create or replace function set_message_typing_updated_at()
 returns trigger
 language plpgsql
+security definer
 as $$
 begin
   new.updated_at = now();
@@ -421,6 +385,7 @@ before update on message_typing
 for each row execute function set_message_typing_updated_at();
 
 -- Conversations summary
+DROP FUNCTION IF EXISTS get_conversations(uuid) CASCADE;
 create or replace function get_conversations(p_user_id uuid)
 returns table(
   id uuid,
@@ -434,6 +399,7 @@ returns table(
 )
 language sql
 stable
+security definer
 as $$
   with msgs as (
     select
@@ -492,6 +458,15 @@ alter table notifications enable row level security;
 drop policy if exists "Users can view their notifications" on notifications;
 create policy "Users can view their notifications" on notifications
   for select using (auth.uid() = user_id and not is_banned(auth.uid()));
+
+-- Notification triggers
+DROP FUNCTION IF EXISTS notify_on_like() CASCADE;
+create or replace function notify_on_like()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
 declare
   post_owner uuid;
 begin
@@ -506,17 +481,16 @@ begin
   end if;
 
   insert into notifications (user_id, related_user_id, related_post_id, type, title, message)
-  values (post_owner, new.user_id, new.post_id, 'like', 'Nuevo like', 'Le gusto tu publicacion.');
+  values (post_owner, new.user_id, new.post_id, 'like', 'Nuevo like', 'Le gustó tu publicación.');
 
   return new;
 end;
 $$;
 
 drop trigger if exists trg_notify_like on likes;
-create trigger trg_notify_like
-after insert on likes
-for each row execute function notify_on_like();
+create trigger trg_notify_like after insert on likes for each row execute function notify_on_like();
 
+DROP FUNCTION IF EXISTS notify_on_comment() CASCADE;
 create or replace function notify_on_comment()
 returns trigger
 language plpgsql
@@ -537,17 +511,16 @@ begin
   end if;
 
   insert into notifications (user_id, related_user_id, related_post_id, type, title, message)
-  values (post_owner, new.user_id, new.post_id, 'comment', 'Nuevo comentario', 'Comento tu publicacion.');
+  values (post_owner, new.user_id, new.post_id, 'comment', 'Nuevo comentario', 'Comentó tu publicación.');
 
   return new;
 end;
 $$;
 
 drop trigger if exists trg_notify_comment on comments;
-create trigger trg_notify_comment
-after insert on comments
-for each row execute function notify_on_comment();
+create trigger trg_notify_comment after insert on comments for each row execute function notify_on_comment();
 
+DROP FUNCTION IF EXISTS notify_on_follow() CASCADE;
 create or replace function notify_on_follow()
 returns trigger
 language plpgsql
@@ -568,16 +541,45 @@ begin
   end if;
 
   insert into notifications (user_id, related_user_id, type, title, message)
-  values (new.following_id, new.follower_id, 'follow', 'Nuevo seguidor', 'Empezo a seguirte.');
+  values (new.following_id, new.follower_id, 'follow', 'Nuevo seguidor', 'Empezó a seguirte.');
 
   return new;
 end;
 $$;
 
 drop trigger if exists trg_notify_follow on follows;
-create trigger trg_notify_follow
-after insert on follows
-for each row execute function notify_on_follow();
+create trigger trg_notify_follow after insert on follows for each row execute function notify_on_follow();
+
+DROP FUNCTION IF EXISTS notify_on_message() CASCADE;
+create or replace function notify_on_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if is_banned(new.sender_id) or is_banned(new.receiver_id) then
+    return new;
+  end if;
+
+  insert into notifications (user_id, related_user_id, type, title, message)
+  values (
+    new.receiver_id,
+    new.sender_id,
+    'message',
+    'Nuevo mensaje',
+    case 
+      when length(new.content) > 50 then left(new.content, 47) || '...'
+      else new.content
+    end
+  );
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_notify_message on messages;
+create trigger trg_notify_message after insert on messages for each row execute function notify_on_message();
 
 -- Admin roles
 create table if not exists admin_roles (
@@ -592,21 +594,25 @@ create table if not exists admin_roles (
 alter table admin_roles enable row level security;
 
 -- Admin helper
-create or replace function is_admin(user_id uuid)
+DROP FUNCTION IF EXISTS is_admin(uuid) CASCADE;
+create or replace function is_admin(p_user_id uuid)
 returns boolean
 language sql
 stable
+security definer
 as $$
   select exists(
     select 1 from admin_roles
-    where admin_roles.user_id = is_admin.user_id
+    where admin_roles.user_id = p_user_id
   );
 $$;
 
+DROP FUNCTION IF EXISTS check_username_availability(text) CASCADE;
 create or replace function check_username_availability(username_to_check text)
 returns boolean
 language sql
 stable
+security definer
 as $$
   select not exists(
     select 1 from profiles
@@ -636,9 +642,11 @@ create policy "Admins can update banned users" on banned_users
   for update using (is_admin(auth.uid()) and not is_banned(auth.uid()));
 
 -- Trigger to keep updated_at for privacy_settings
+DROP FUNCTION IF EXISTS set_updated_at() CASCADE;
 create or replace function set_updated_at()
 returns trigger
 language plpgsql
+security definer
 as $$
 begin
   new.updated_at = now();
@@ -651,6 +659,7 @@ create trigger trg_privacy_settings_updated
 before update on privacy_settings
 for each row execute function set_updated_at();
 
+DROP FUNCTION IF EXISTS update_posts_count() CASCADE;
 create or replace function update_posts_count()
 returns trigger
 language plpgsql
@@ -676,6 +685,7 @@ create trigger trg_posts_count
 after insert or delete on posts
 for each row execute function update_posts_count();
 
+DROP FUNCTION IF EXISTS update_comments_count() CASCADE;
 create or replace function update_comments_count()
 returns trigger
 language plpgsql
@@ -701,6 +711,7 @@ create trigger trg_comments_count
 after insert or delete on comments
 for each row execute function update_comments_count();
 
+DROP FUNCTION IF EXISTS update_likes_count() CASCADE;
 create or replace function update_likes_count()
 returns trigger
 language plpgsql
@@ -726,6 +737,7 @@ create trigger trg_likes_count
 after insert or delete on likes
 for each row execute function update_likes_count();
 
+DROP FUNCTION IF EXISTS update_follow_counts() CASCADE;
 create or replace function update_follow_counts()
 returns trigger
 language plpgsql
@@ -760,6 +772,7 @@ after insert or delete on follows
 for each row execute function update_follow_counts();
 
 -- Create profile on signup
+DROP FUNCTION IF EXISTS handle_new_user() CASCADE;
 create or replace function handle_new_user()
 returns trigger
 language plpgsql
